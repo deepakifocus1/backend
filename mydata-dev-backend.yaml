@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mydata-dev-backend-app-deployment
+  namespace: wiztap
+  labels:
+    app.kubernetes.io/name: mydata-dev-backend-app
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mydata-dev-backend-app
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mydata-dev-backend-app
+    spec:
+      containers:
+      - name: mydata-dev-backend-app-container
+        image: 409643066282.dkr.ecr.ap-south-1.amazonaws.com/mydata-dev-backend:latest
+        imagePullPolicy: Always
+        ports:
+            - containerPort: 80
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: s3-secrets
+                key: aws_access_key_id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: s3-secrets
+                key: aws_secret_access_key
+          - name: BUCKET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: s3-config
+                key: bucket_name
+          - name: REGION
+            valueFrom:
+              configMapKeyRef:
+                name: s3-config
+                key: region
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: wiztap
+  name: mydata-dev-backend-app-service
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+spec:
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: mydata-dev-backend-app

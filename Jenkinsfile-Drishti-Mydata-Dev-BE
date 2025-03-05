@@ -1,0 +1,92 @@
+pipeline {
+    agent any
+    environment {
+        AWS_ACCOUNT_ID="409643066282"
+        AWS_DEFAULT_REGION="ap-south-1"
+        IMAGE_REPO_NAME="mydata-dev-backend"
+        IMAGE_TAG="latest"
+        REPOSITORY_URI = "409643066282.dkr.ecr.ap-south-1.amazonaws.com/mydata-dev-backend"
+    }
+
+    stages {
+        stage('SonarQube Analysis') {
+    steps {
+        nodejs(nodeJSInstallationName: 'nodejs') {
+            // Install dependencies and run tests
+            sh "npm install --force"
+            sh "npm run coverage"
+            sh "npm run test"
+            sh "npm run sonar-dev"
+
+            // Start the script block for credential usage
+            script {
+                withCredentials([usernamePassword(credentialsId: 'sonarCredentialsId', usernameVariable: 'SONAR_USER', passwordVariable: 'SONAR_PASSWORD')]) {
+                    // Perform SonarQube analysis
+                    sh "npm run sonar-dev"
+
+                    // Using credentials to get quality gate status securely
+                    def sonarStatus = sh(script: '''
+                        curl -u $SONAR_USER:$SONAR_PASSWORD -L -s "http://sonar.wiztap.in/api/qualitygates/project_status?projectKey=MyData-Dev" -o result.json
+                        jq -r ".projectStatus.status" result.json
+                    ''', returnStdout: true).trim()
+                    
+                    // Evaluate quality gate status
+                    if (sonarStatus == 'ERROR') {
+                        error "Quality Gate Failed: Code violations detected."
+                    } else {
+                        echo "Quality Gate Passed."
+                    }
+                }
+            }
+        }
+    }
+}
+
+    // Building Docker images        
+    stage('Building image') {
+      steps{
+        script {
+          dockerImage = docker.build("${IMAGE_REPO_NAME}:${IMAGE_TAG}", "--build-arg NODE_ENV=development .")
+        }
+      }
+    }
+
+        stage('Logging into AWS ECR') {
+            steps {
+                script {
+                    sh 'aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 409643066282.dkr.ecr.ap-south-1.amazonaws.com'
+                }
+            }
+        }    
+   
+    // Uploading Docker images into AWS ECR
+    stage('Pushing to ECR') {
+     steps{  
+         script {
+                sh """docker tag ${IMAGE_REPO_NAME}:${IMAGE_TAG} ${REPOSITORY_URI}:$IMAGE_TAG"""
+                sh """docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMAGE_REPO_NAME}:${IMAGE_TAG}"""
+         }
+        }
+      }
+    stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    // Apply the Kubernetes deployment and service
+                    sh "aws eks update-kubeconfig --region ap-south-1 --name Devops-Cluster"
+                    sh "kubectl delete deployments mydata-dev-backend-app-deployment -n wiztap"
+                    sh "sleep 30"
+                    sh "kubectl apply -f mydata-dev-backend.yaml"
+                }
+            }
+        }
+   }
+
+    post {
+        success {
+            echo 'Mydata dev backend pipeline finished successfully'
+        }
+        failure {
+            echo 'Mydata dev backend pipeline failed'
+        }
+    }
+}
