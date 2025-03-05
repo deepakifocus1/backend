@@ -1,6 +1,7 @@
 import cors from "cors";
 
 const allowedOrigins = [
+  "https://l9c9c4wk-3000.inc1.devtunnels.ms",
   "http://localhost:3000",
   "http://localhost:3001",
   "https://devdrishti.wiztap.in",
